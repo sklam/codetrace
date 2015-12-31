@@ -118,17 +118,23 @@ class Traces(Mapping):
             # Add exception edges
             exc_handler = state.get_except_handler()
             if exc_handler is not None:
-                g.edge(str(label), str(exc_handler), style='dotted',
-                       label='except')
-            # Add finally edges
-            fin_handler = state.get_finally_handler()
-            if fin_handler is not None:
-                g.edge(str(label), str(fin_handler), style='dotted',
-                       label='finally')
+                g.edge(str(label), str(exc_handler.escape_label),
+                       style='dotted', label='except')
+
         return g
 
-    def view_dot_graph(self, filename=None):
-        self.get_dot_graph().render(filename, view=True)
+    def view_dot_graph(self, filename=None, view=True):
+        src = self.get_dot_graph()
+        if view:
+            return src.render(filename, view=view)
+        else:
+            try:
+                import IPython.display as display
+            except ImportError:
+                return src
+            else:
+                format = 'png'
+                return display.Image(data=src.pipe(format))
 
 
 def run_trace(offset_map, start_pc, jmp_targets):
@@ -222,6 +228,7 @@ def _handle_signals(state, jmp_targets, heads, labels, cur_bc, pc, signal):
         return
 
     elif isinstance(signal, Finally):
+        # XXX: can we not special case the With signal. it is the same?
         if isinstance(signal, With):
             try_state = state.fork(signal.try_block[0],
                                    signal.try_block[1])
@@ -240,8 +247,12 @@ def _handle_signals(state, jmp_targets, heads, labels, cur_bc, pc, signal):
         else:
             try_state = state.fork(signal.try_block[0],
                                    signal.try_block[1])
+            exceptinfos = [Traceback(),
+                           ExceptionValue(),
+                           ExceptionType(), ]
             fin_state = state.fork(signal.finally_block[0],
                                    signal.finally_block[1],
+                                   extra_stack=exceptinfos,
                                    pop_block=True)
             heads.append(try_state)
             heads.append(fin_state)
@@ -271,16 +282,18 @@ class TraceState(object):
                              len(incoming_block_stack))
         self._outgoing_stacks = {}
 
+        # Find exception handler block (e.g. ExceptBlock or FinallyBlock)
         self._except_handler = None
         for blk in reversed(self._block_stack):
-            if isinstance(blk, ExceptBlock):
-                self._except_handler = blk.source
+            if isinstance(blk, OutOfBandBlock) and blk.in_range(start_pc):
+                self._except_handler = blk
                 break
 
+        # Find finally block (e.g. for return)
         self._finally_handler = None
         for blk in reversed(self._block_stack):
-            if isinstance(blk, FinallyBlock):
-                self._finally_handler = blk.source
+            if isinstance(blk, FinallyBlock) and blk.in_range(start_pc):
+                self._finally_handler = blk
                 break
 
     @property
@@ -336,9 +349,7 @@ class TraceState(object):
         self._stack.append(val)
 
     def stack_peek(self):
-        val = self.stack_pop()
-        self._stack.append(val)
-        return val
+        return self._stack[-1]
 
     @property
     def is_stack_empty(self):
@@ -349,6 +360,9 @@ class TraceState(object):
 
     def block_pop(self):
         return self._block_stack.pop()
+
+    def block_peek(self):
+        return self._block_stack[-1]
 
     def code_append(self, opcode, **operands):
         """
@@ -368,13 +382,13 @@ class TraceState(object):
         if not self._except_handler:
             return None
         else:
-            return self._except_handler.operands['escape']
+            return self._except_handler
 
     def get_finally_handler(self):
         if not self._finally_handler:
             return None
         else:
-            return self._finally_handler.operands['escape']
+            return self._finally_handler
 
     def replace_labels(self, mapping):
         for inst in self.code:
@@ -394,10 +408,8 @@ class TraceState(object):
             buf.append("outgoing {0} = {1}".format(label, stack))
         buf.append("block stack = {0}".format(self._block_stack))
         if self._except_handler:
-            buf.append("except handler = {0}".format(self.get_except_handler()))
-        if self._finally_handler:
-            buf.append("finally handler = {0}".format(
-                self.get_finally_handler()))
+            fmt = "except handler = {0}"
+            buf.append(fmt.format(self.get_except_handler().escape_label))
 
         for inst, livevars in zip(self.code, self.compute_lifetime()):
             if not show_meta:
@@ -535,6 +547,7 @@ class Block(object):
         self._name = _unique_namer()
 
     def set_source(self, inst):
+        assert 'end' in inst.operands, 'inst does not define "end"'
         self._source = weakref.ref(inst)
 
     @property
@@ -544,16 +557,32 @@ class Block(object):
     def __repr__(self):
         return "@{0}.{1}".format(type(self).__name__, self._name)
 
+    @property
+    def end_offset(self):
+        """
+        Ending bytecode offset
+        """
+        return self.source.operands['end']
+
+    def in_range(self, pc):
+        return self.end_offset >= pc
+
 
 class LoopBlock(Block):
     pass
 
 
-class ExceptBlock(Block):
+class OutOfBandBlock(Block):
+    @property
+    def escape_label(self):
+        return self.source.operands['escape']
+
+
+class ExceptBlock(OutOfBandBlock):
     pass
 
 
-class FinallyBlock(Block):
+class FinallyBlock(OutOfBandBlock):
     pass
 
 
@@ -566,6 +595,8 @@ class Value(object):
 
 
 class TempValue(Value):
+    prefix = 'tmp'
+
     def __init__(self):
         self._source = None
         self._name = _unique_namer()
@@ -587,10 +618,18 @@ class TempValue(Value):
         return src
 
     def __repr__(self):
-        return "%tmp.{0}".format(self._name)
+        return "%{0}.{1}".format(self.prefix, self._name)
 
 
-class SpecialValue(Value):
+class Returned(TempValue):
+    prefix='ret'
+
+
+class Slienced(TempValue):
+    prefix = "slienced"
+
+
+class InjectedValue(Value):
     prefix = None  # to be overriden in subclass
 
     def __init__(self):
@@ -604,19 +643,16 @@ class SpecialValue(Value):
         return "%{0}.{1}".format(self.prefix, self._name)
 
 
-class Slienced(SpecialValue):
-    prefix = "slienced"
 
-
-class ExceptionType(SpecialValue):
+class ExceptionType(InjectedValue):
     prefix = 'excepttype'
 
 
-class ExceptionValue(SpecialValue):
+class ExceptionValue(InjectedValue):
     prefix = 'exceptvalue'
 
 
-class Traceback(SpecialValue):
+class Traceback(InjectedValue):
     prefix = 'traceback'
 
 
@@ -841,10 +877,31 @@ class SymbolicExecutor(object):
         signal.add_target(label, target)
         return signal
 
+    def op_return(self, state, val):
+        fini = state.get_finally_handler()
+        if fini is not None:
+            state.stack_push(val)
+            ret = Returned()
+            state.code_append("set_returned_value", value=val, out=ret)
+            state.stack_push(ret)
+            label = Label()
+            state.code_append("jump", target=label)
+            # clear all the blocks until the finally block
+            while not isinstance(state.block_peek(), FinallyBlock):
+                state.block_pop()
+            # pop the finally block as well
+            state.block_pop()
+
+            signal = Branch()
+            signal.add_target(label, fini.end_offset)
+            return signal
+        else:
+            state.code_append("ret", value=val)
+            return StopTrace()
+
     def op_RETURN_VALUE(self, state, bc):
         val = state.stack_pop()
-        state.code_append("ret", value=val)
-        return StopTrace()
+        return self.op_return(state, val)
 
     def op_FOR_ITER(self, state, bc):
         iterator = state.stack_peek()
@@ -880,7 +937,7 @@ class SymbolicExecutor(object):
         block = LoopBlock()
         state.code_append("push_block",
                           kind='loop',
-                          loop_end=get_jump_target(bc),
+                          end=get_jump_target(bc),
                           out=block)
         state.block_push(block)
         return Continue()
@@ -938,6 +995,7 @@ class SymbolicExecutor(object):
         state.code_append("push_block", kind="except",
                           target=next_label,
                           escape=target_label,
+                          end=target,
                           out=block)
         state.block_push(block)
         state.code_append("jump", target=next_label)
@@ -945,9 +1003,12 @@ class SymbolicExecutor(object):
                       except_block=(target_label, target))
 
     def op_END_FINALLY(self, state, bc):
+        def is_const_none(val):
+            inst = val.source
+            return inst.opcode == 'const' and inst.operands['value'] is None
+
         if state.is_stack_empty:
-            raise NotImplementedError("stack is empty at END_FINALLY")
-            return Continue()
+            raise RuntimeError("stack is empty at END_FINALLY", bc)
         elif isinstance(state.stack_peek(), ExceptionType):
             et = state.stack_pop()  # exception type
             ev = state.stack_pop()  # exception value
@@ -957,8 +1018,14 @@ class SymbolicExecutor(object):
         elif isinstance(state.stack_peek(), Slienced):
             state.stack_pop()
             return Continue()
+        elif isinstance(state.stack_peek(), Returned):
+            state.stack_pop()
+            state.code_append("ret", value=state.stack_pop())
+            return StopTrace()
+        elif is_const_none(state.stack_peek()):
+            state.stack_pop()
+            return Continue()
         else:
-            print(state._stack)
             template = "unhandled case in END_FINALLY: {0}"
             raise TypeError(template.format(state.stack_peek().source))
 
@@ -970,9 +1037,10 @@ class SymbolicExecutor(object):
         state.code_append("push_block", kind="finally",
                           target=next_label,
                           escape=target_label,
+                          end=target,
                           out=block)
         state.block_push(block)
-
+        state.code_append("jump", target=next_label)
         return Finally(try_block=(next_label, bc.next),
                        finally_block=(target_label, target))
 
@@ -995,6 +1063,7 @@ class SymbolicExecutor(object):
         state.code_append("push_block", kind="with",
                           target=next_label,
                           escape=target_label,
+                          end=target,
                           out=block)
         state.block_push(block)
         return With(try_block=(next_label, bc.next),
@@ -1013,13 +1082,16 @@ class SymbolicExecutor(object):
             state.code_append("with_exit_raised", exit=exit, type=et, value=ev,
                               traceback=tb, out=res)
 
+            slienced = Slienced()
+            state.code_append("slienced", out=slienced)
+
             true_label = Label()
             false_label = Label()
             state.code_append("jump_if", cond=res, target_true=true_label,
                               target_false=false_label)
 
             br = Branch()
-            br.add_target(true_label, bc.next, extra=[Slienced()])
+            br.add_target(true_label, bc.next, extra=[slienced])
             br.add_target(false_label, bc.next, extra=[tb, ev, et])
             return br
         else:

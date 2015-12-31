@@ -107,14 +107,20 @@ def generate_sm_switch(traces, srcbuf, vm):
         ifthen = '{el}if {vm}.pc == {cur}:'.format(el=el, vm=vm,
                                                    cur=jump_table[label])
         with srcbuf.indent_context(ifthen):
+            init_linect = srcbuf.line_count
             instprinter = InstPrinter(traces=traces, vm=vm, srcbuf=srcbuf,
                                       state=state, jump_table=jump_table)
             instprinter.init_state()
             for inst in state.code:
                 instprinter.process(inst)
             instprinter.fini_state()
-
+            # Nothing was printed?
+            if srcbuf.line_count == init_linect:
+                raise RuntimeError("empty block?")
         el = 'el'
+
+    with srcbuf.indent_context('else:'):
+        srcbuf.println('return {vm}.end_of_code()'.format(vm=vm))
 
 
 def generate_sm_state(traces, srcbuf, pc, label, state):
@@ -142,7 +148,7 @@ class InstPrinter(object):
         hdlr = self.state.get_except_handler()
         if hdlr is not None:
             fmt = '{vm}.push_handler(kind={kind!r}, pc={pc})'
-            kwargs = dict(vm=self.vm, pc=self.jump_table[hdlr],
+            kwargs = dict(vm=self.vm, pc=self.jump_table[hdlr.escape_label],
                           kind='except')
             self.srcbuf.println(fmt.format(**kwargs))
 
@@ -273,6 +279,9 @@ class InstPrinter(object):
         with self.srcbuf.indent_context('else:'):
             self._jump_to_label(label_false)
 
+    def op_set_returned_value(self, inst):
+        pass   # no-op
+
     def _jump_to_label(self, label):
         target = self.jump_table[label]
         self.srcbuf.println('{vm}.pc = {target}'.format(vm=self.vm,
@@ -332,6 +341,10 @@ class SourceBuffer(object):
     def __init__(self):
         self._buf = []
         self._indentlevel = 0
+
+    @property
+    def line_count(self):
+        return len(self._buf)
 
     def println(self, text):
         assert self._indentlevel >= 0

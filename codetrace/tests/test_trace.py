@@ -193,6 +193,20 @@ class TestTrace(unittest.TestCase):
         errcases = [(AttributeError, (None,))]
         self.check_trace(foo, cases, errcases)
 
+    def test_try_finally(self):
+        def foo(a):
+            try:
+                return a.notreally
+            finally:
+                return 123
+
+        class Dummy(object):
+            notreally = 555
+
+        cases = [(0,),
+                 (Dummy,)]
+        self.check_trace(foo, cases)
+
 
 if __name__ == '__main__':
     unittest.main()
