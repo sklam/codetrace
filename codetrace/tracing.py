@@ -1,11 +1,32 @@
 from __future__ import absolute_import, print_function
+import sys
 import dis
+from io import StringIO
 import inspect
 from .bcutils import (parse_bytecode, find_jump_targets, get_code_from_object,
                       get_jump_target)
 from .utils import unique_name_generator
 from collections import Mapping
 import weakref
+import logging
+
+
+logger = logging.getLogger(__name__)
+
+
+def _dissemble(obj):
+    """
+    Call ``dis.dis(obj)`` but the output is redirected to a string
+    """
+    stdout = sys.stdout
+    sys.stdout = buf = StringIO()
+    try:
+        dis.dis(obj)
+    finally:
+        sys.stdout = stdout
+    res = buf.getvalue()
+    buf.close()
+    return res
 
 
 def trace(obj):
@@ -15,7 +36,7 @@ def trace(obj):
     """
     # Preparation
     code = get_code_from_object(obj)
-    dis.dis(code)  # TODO remove me
+    logging.debug("code of %r:\n%s", obj, _dissemble(code))
     bcinfos = parse_bytecode(code)
     jmp_targets = find_jump_targets(bcinfos)
     entry_pt = bcinfos[0].offset
@@ -28,9 +49,10 @@ def trace(obj):
     # Trace
     traces = run_trace(offset_map, entry_pt, jmp_targets)
     for k, v in traces.items():
-        print(k)
+        logger.info('trace %s: state %s', k, v)
         v.optimize_load_stores()
-        print(v.show())
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("dump state %s:\n%s", v, v.show())
 
     return Traces(obj, code, offset_map, traces, entry_pc=entry_pt)
 
@@ -160,7 +182,7 @@ def run_trace(offset_map, start_pc, jmp_targets):
 
         traces[key] = state
         pc = state.start_pc
-        print("Trace", pc)
+        logger.debug("tracing PC=%s", pc)
         while True:
             cur_bc = offset_map[pc]
             signal = symexec.execute(state, cur_bc)
@@ -768,7 +790,7 @@ class SymbolicExecutor(object):
         """
         state.code_append(".loc", offset=bc.offset)
         fn = getattr(self, "op_{0}".format(bc.opname))
-        print(bc)  # XXX remove me
+        logger.debug("translating %s", bc)
         signal = fn(state, bc)
         assert isinstance(signal, TraceSignal)
         return signal
@@ -1070,7 +1092,6 @@ class SymbolicExecutor(object):
                     finally_block=(target_label, target))
 
     def op_WITH_CLEANUP(self, state, bc):
-        print(state._stack)
         if isinstance(state.stack_peek(), ExceptionType):
             et = state.stack_pop()
             ev = state.stack_pop()
