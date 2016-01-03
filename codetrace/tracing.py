@@ -47,7 +47,7 @@ def trace(obj):
         offset_map[bc.offset] = bc
 
     # Trace
-    traces = run_trace(offset_map, entry_pt, jmp_targets)
+    traces = run_trace(offset_map, entry_pt, jmp_targets, code)
     for k, v in traces.items():
         logger.info('trace %s: state %s', k, v)
         v.optimize_load_stores()
@@ -123,6 +123,18 @@ class Traces(Mapping):
     def argspec(self):
         return inspect.getargspec(self._pyobj)
 
+    def get_global_names(self):
+        """
+        Returns a set of names of referenced globals
+        """
+        names = set()
+        for st in self.states:
+            names |= st.get_global_names()
+        return names
+
+    def outgoing_states(self, state):
+        return set(self[label] for label in state.outgoing_labels)
+
     def get_dot_graph(self):
         from graphviz import Digraph
 
@@ -159,14 +171,14 @@ class Traces(Mapping):
                 return display.Image(data=src.pipe(format))
 
 
-def run_trace(offset_map, start_pc, jmp_targets):
+def run_trace(offset_map, start_pc, jmp_targets, pycode):
     """
     Given `offset_map` as a mapping of bytecode offset to parsed bytecode
     objects. Start tracing at `start_pc`.  Using `jmp_targets` as a sequence
     of starting offset of new traces.
     """
     symexec = SymbolicExecutor()
-    state = TraceState(start_pc=start_pc)
+    state = TraceState(pycode=pycode, start_pc=start_pc)
     heads = [state]
     traces = {}
     labels = {state: Label()}
@@ -294,7 +306,9 @@ class TraceState(object):
     Records the stack, block stack (frame block) and instructions.
     """
 
-    def __init__(self, start_pc, incoming_stack=(), incoming_block_stack=()):
+    def __init__(self, pycode, start_pc, incoming_stack=(),
+                 incoming_block_stack=()):
+        self.pycode = pycode
         self.start_pc = start_pc
         self.incoming_stack = tuple(incoming_stack)
         self._stack = list(incoming_stack)
@@ -317,6 +331,11 @@ class TraceState(object):
             if isinstance(blk, FinallyBlock) and blk.in_range(start_pc):
                 self._finally_handler = blk
                 break
+
+    def __repr__(self):
+        return "<{cls} code={code} pc={pc}>".format(cls=type(self).__name__,
+                                                    code=self.pycode,
+                                                    pc=self.start_pc)
 
     @property
     def fingerprint(self):
@@ -345,7 +364,7 @@ class TraceState(object):
         assert label not in self._outgoing_stacks
         if not exceptional:
             self._outgoing_stacks[label] = tuple(incoming_stack)
-        return TraceState(pc, incoming_stack, incoming_block_stack)
+        return TraceState(self.pycode, pc, incoming_stack, incoming_block_stack)
 
     @property
     def outgoing_values(self):
@@ -360,7 +379,7 @@ class TraceState(object):
         return self._outgoing_stacks[label]
 
     @property
-    def outoing_labels(self):
+    def outgoing_labels(self):
         return set(self._outgoing_stacks.keys())
 
     def stack_pop(self):
@@ -419,6 +438,13 @@ class TraceState(object):
         for label, stack in self.outgoing_stacks:
             new_out_stacks[mapping.get(label, label)] = stack
         self._outgoing_stacks = new_out_stacks
+
+    def get_global_names(self):
+        names = set()
+        for inst in self.code:
+            if inst.opcode == 'global':
+                names.add(inst.operands['name'])
+        return names
 
     def show(self, show_lifetime=True, show_meta=True):
         """
@@ -788,7 +814,7 @@ class SymbolicExecutor(object):
           - Sequence of jump targets
           - StopIteration to end the trace
         """
-        state.code_append(".loc", offset=bc.offset)
+        state.code_append(".loc", offset=bc.offset, lineno=bc.lineno)
         fn = getattr(self, "op_{0}".format(bc.opname))
         logger.debug("translating %s", bc)
         signal = fn(state, bc)
@@ -846,6 +872,9 @@ class SymbolicExecutor(object):
 
     def op_BINARY_ADD(self, state, bc):
         return self.op_binary(state, bc, opcode="add")
+
+    def op_BINARY_SUBTRACT(self, state, bc):
+        return self.op_binary(state, bc, opcode="sub")
 
     def op_BINARY_MULTIPLY(self, state, bc):
         return self.op_binary(state, bc, opcode="mul")

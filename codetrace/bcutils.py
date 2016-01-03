@@ -245,6 +245,11 @@ class BINARY_ADD(BinaryOp):
 
 
 @BytecodeSpec.define
+class BINARY_SUBTRACT(BinaryOp):
+    pass
+
+
+@BytecodeSpec.define
 class BINARY_MULTIPLY(BinaryOp):
     pass
 
