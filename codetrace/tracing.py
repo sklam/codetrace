@@ -47,7 +47,7 @@ def trace(obj):
         offset_map[bc.offset] = bc
 
     # Trace
-    traces = run_trace(offset_map, entry_pt, jmp_targets, code)
+    traces = run_trace(offset_map, entry_pt, jmp_targets, obj, code)
     for k, v in traces.items():
         logger.info('trace %s: state %s', k, v)
         v.optimize_load_stores()
@@ -123,6 +123,10 @@ class Traces(Mapping):
     def argspec(self):
         return inspect.getargspec(self._pyobj)
 
+    @property
+    def globals(self):
+        return self._pyobj.__globals__
+
     def get_global_names(self):
         """
         Returns a set of names of referenced globals
@@ -171,14 +175,14 @@ class Traces(Mapping):
                 return display.Image(data=src.pipe(format))
 
 
-def run_trace(offset_map, start_pc, jmp_targets, pycode):
+def run_trace(offset_map, start_pc, jmp_targets, pyobj, pycode):
     """
     Given `offset_map` as a mapping of bytecode offset to parsed bytecode
     objects. Start tracing at `start_pc`.  Using `jmp_targets` as a sequence
     of starting offset of new traces.
     """
     symexec = SymbolicExecutor()
-    state = TraceState(pycode=pycode, start_pc=start_pc)
+    state = TraceState(pyobj=pyobj, pycode=pycode, start_pc=start_pc)
     heads = [state]
     traces = {}
     labels = {state: Label()}
@@ -306,8 +310,9 @@ class TraceState(object):
     Records the stack, block stack (frame block) and instructions.
     """
 
-    def __init__(self, pycode, start_pc, incoming_stack=(),
+    def __init__(self, pyobj, pycode, start_pc, incoming_stack=(),
                  incoming_block_stack=()):
+        self.pyobj = pyobj
         self.pycode = pycode
         self.start_pc = start_pc
         self.incoming_stack = tuple(incoming_stack)
@@ -341,6 +346,10 @@ class TraceState(object):
     def fingerprint(self):
         return self._fingerprint
 
+    @property
+    def is_entry(self):
+        return self.start_pc == 0
+
     def fork(self, label, pc, extra_stack=(), pop_block=False,
              exceptional=False):
         """
@@ -364,7 +373,31 @@ class TraceState(object):
         assert label not in self._outgoing_stacks
         if not exceptional:
             self._outgoing_stacks[label] = tuple(incoming_stack)
-        return TraceState(self.pycode, pc, incoming_stack, incoming_block_stack)
+        return TraceState(self.pyobj, self.pycode, pc, incoming_stack,
+                          incoming_block_stack)
+
+    @property
+    def name(self):
+        return self.pycode.co_name
+
+    @property
+    def filename(self):
+        return self.pycode.co_filename
+
+    @property
+    def firstlineno(self):
+        for inst in self.code:
+            if inst.opcode == '.loc':
+                return inst.operands['lineno']
+        raise AssertionError('missing .loc in body')
+
+    @property
+    def argspec(self):
+        return inspect.getargspec(self.pyobj)
+
+    @property
+    def globals(self):
+        return self.pyobj.__globals__
 
     @property
     def outgoing_values(self):
