@@ -385,9 +385,9 @@ class CFGraph(object):
         self._topo_order = post_order
 
     def _find_descendents(self):
-        descs = {}
+        descs = collections.defaultdict(set)
         for node in reversed(self._topo_order):
-            descs[node] = node_descs = set()
+            node_descs = descs[node]
             for succ in self._succs[node]:
                 if (node, succ) not in self._back_edges:
                     node_descs.add(succ)
