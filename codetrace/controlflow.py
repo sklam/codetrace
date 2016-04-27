@@ -444,3 +444,192 @@ class CFGraph(object):
                          for src, dests in self._succs.items())
         import pprint
         pprint.pprint(adj_lists, stream=file)
+
+
+# ------------------------------- Extended -------------------------------
+
+
+class ExtCFGraph(CFGraph):
+
+    def process(self):
+        super(ExtCFGraph, self).process()
+        self._build_dominator_tree()
+        self._build_post_dominator_tree()
+        self._build_region_tree()
+
+    def _build_dominator_tree(self):
+        doms = self.dominators()
+        cur = self.entry_point()
+        tree = {cur: _build_dom_tree(cur, doms)}
+        self._domtree = tree
+
+    def _build_post_dominator_tree(self):
+        pdoms = self.post_dominators()
+        tree = {}
+        for cur in self.exit_points():
+            tree[cur] = _build_dom_tree(cur, pdoms)
+        self._postdomtree = tree
+
+    def dominator_tree(self):
+        return self._domtree
+
+    def post_dominator_tree(self):
+        return self._postdomtree
+
+    def region_tree(self):
+        return self._regiontree
+
+    def _build_region_tree(self):
+        # Reference:
+        # Johnson, Richard, David Pearson, and Keshav Pingali.
+        # The program structure tree: Computing control regions in linear time.
+        # ACM SigPlan Notices. Vol. 29. No. 6. ACM, 1994.
+        # http://iss.ices.utexas.edu/Publications/Papers/PLDI1994.pdf
+
+        from pprint import pprint
+        # Find initial single-entry single-exit region
+        doms = self.dominators()
+        pdoms = self.post_dominators()
+        # rule 1: a dominates b
+        a_dom_b = ((b, a) for b, alist in doms.items() for a in alist)
+        # rule 2: b post-dominates a
+        b_pdom_a = ((b, a) for b, a in a_dom_b if b in pdoms[a])
+        # rule 3: cycle equivalence -- every cycle containing a contains b
+        loops = self.loops().values()
+        regions = set((a, b) for b, a in b_pdom_a)
+        for loop in loops:
+            body = loop.body
+            for a, b in list(regions):
+                intersect = set([a, b]) & body
+                if len(intersect) == 1:
+                    regions.discard((a, b))
+
+        pprint(regions)
+        # assign containment
+        containment = collections.defaultdict(set)
+
+        def contains(n, a, b):
+            # node n is contained if for region (a, b) a dom n and b postdom n
+            return a in doms[n] and b in pdoms[n]
+
+        for na, nb in regions:
+            for a, b in regions:
+                if not (na is a and nb is b):
+                    if contains(na, a, b) and contains(nb, a, b):
+                        containment[a, b].add((na, nb))
+
+        pprint(containment)
+        # build region tree
+
+        def build_region_tree(regiontree, nodes):
+            # find all regions not contained by others in the activeset
+            activeset = set(nodes)
+            innerset = set()
+
+            for reg in activeset:
+                innerset.add(reg)
+                for other in (activeset - set([reg])):
+                    if reg in containment[other]:
+                        innerset.discard(reg)
+
+            for reg in innerset:
+                regiontree[reg] = subtree = {}
+                build_region_tree(subtree, containment[reg])
+
+        regiontree = {}
+        build_region_tree(regiontree, containment)
+
+        def finalize_region_tree(regiontree, nodes):
+            regions = set()
+            for (first, last), subregions in regiontree.items():
+                region = Region(first, last)
+                inner_regions = finalize_region_tree(subregions, nodes)
+                region.regions |= inner_regions
+                region.copy_nodes_from_subregions()
+                for n in list(nodes):
+                    if contains(n, first, last):
+                        region.nodes.add(n)
+                        nodes.discard(n)
+                regions.add(region)
+            return regions
+
+        toplevel = finalize_region_tree(regiontree, set(self.nodes()))
+        if len(toplevel) == 1:
+            self._regiontree = tuple(toplevel)[0]
+        else:
+            self._regiontree = Region()
+            self._regiontree.regions |= toplevel
+            self._regiontree.copy_nodes_from_subregions()
+        print(self._regiontree.show())
+
+
+class Region(object):
+    def __init__(self, first=None, last=None):
+        self.first = first
+        self.last = last
+        self.nodes = set()
+        self.regions = set()
+
+    def __eq__(self, other):
+        if isinstance(other, Region):
+            return self.identity == other.identity
+        return NotImplemented
+
+    def __hash__(self):
+        return hash(self.identity)
+
+    def __iter__(self):
+        return iter(self.regions)
+
+    def __len__(self):
+        return len(self.regions)
+
+    def copy_nodes_from_subregions(self):
+        for reg in self.regions:
+            self.nodes |= reg.nodes
+
+    @property
+    def is_stub(self):
+        return self.first is None and self.last is None
+
+    @property
+    def identity(self):
+        return self.first, self.last
+
+
+    def show(self, indent=0):
+        prefix = ' ' * indent
+        buf = []
+        buf.append("{0}+ Region {1}:".format(prefix, self.identity))
+        buf.append("{0}    nodes: {1}".format(prefix, self.nodes))
+        if self.regions:
+            buf.append("{0}    subregions".format(prefix))
+            for reg in self.regions:
+                inner = reg.show(indent=indent + 4)
+                buf.append(inner)
+        return '\n'.join(buf)
+
+
+def _build_dom_tree(cur, doms):
+    """
+    Helper function to build dom and pdom trees recursively
+    """
+    # get all nodes that contains cur and is not cur
+    candidates = set()
+    for k, vl in doms.items():
+        if cur in vl and k is not cur:
+            candidates.add(k)
+    # remove nodes that has a dom in candidates
+    # this is finding the idoms
+    excluded = set()
+    for cand in tuple(candidates):
+        cand_doms = set(doms[cand]) - set([cand])
+        if cand_doms & candidates:
+            excluded.add(cand)
+
+    newroots = candidates - excluded
+    # recursive build the tree
+    out = {}
+    for root in newroots:
+        out[root] = _build_dom_tree(root, doms)
+    return out
