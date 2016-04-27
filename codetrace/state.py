@@ -146,8 +146,9 @@ class State(object):
             raise MalformStateError(msg)
 
     def can_merge(self, other):
-        if len(self._init_stack) != len(other._init_stack):
-            return False
+        # XXX CHECK stack size may not match!?!?
+        # if len(self._init_stack) != len(other._init_stack):
+        #     return False
         if len(self._instlist) != len(other._instlist):
             return False
         for ai, bi in zip(self._instlist, other._instlist):

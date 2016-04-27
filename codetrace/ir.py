@@ -109,7 +109,8 @@ class Jump(Terminator):
 
     def _equivalent(self, other):
         return (self.target == other.target and
-                equivalent_values(zip(self.args, other.args)))
+                equivalent_values(zip(reversed(self.args),
+                                      reversed(other.args))))
 
     def replace_uses(self, mapping):
         return Jump(self.target, [mapping[x] for x in self.args])
@@ -148,8 +149,10 @@ class JumpIf(Terminator):
 
     def _equivalent(self, other):
         values = [(self.pred, other.pred)]
-        values.extend(list(zip(self.then_args, other.then_args)))
-        values.extend(list(zip(self.else_args, other.else_args)))
+        values.extend(list(zip(reversed(self.then_args),
+                               reversed(other.then_args))))
+        values.extend(list(zip(reversed(self.else_args),
+                               reversed(other.else_args))))
         return (self.then == other.then and
                 self.orelse == other.orelse and
                 equivalent_values(values))
