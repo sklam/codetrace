@@ -122,18 +122,20 @@ class TraceGraph(MutableMapping):
             print(key)
             print(st.show())
 
-    def graphviz(self, filename='codetrace_dot.dot', view=True):
-        from graphviz import Digraph
+    def graphviz(self, filename='tracegraph.gv', view=True, postfn=None):
+        from .gvutils import DigraphBuilder
 
-        def fix_line_break(text):
-            return ''.join(ln + '\\l' for ln in text.splitlines())
-
-        styling = dict(fontname='courier', fontsize='9pt')
-        g = Digraph(node_attr=styling, edge_attr=styling)
+        g = DigraphBuilder()
 
         for key, st in sorted(self._states.items(), key=lambda x: x[0][1]):
-            g.node(str(id(st)), label=fix_line_break(st.show()), shape='rect')
+            g.node(id(st), label=st.show(), shape='rect')
 
+        self._draw_edges(g)
+        if postfn is not None:
+            postfn(g)
+        return g.render(filename, view=view)
+
+    def _draw_edges(self, g):
         for st in set(self._states.values()):
             if st._instlist:
                 for label in st.outgoing_labels():
@@ -142,7 +144,7 @@ class TraceGraph(MutableMapping):
                         # missing
                         dest_node = 'missing ' + str(label)
                     else:
-                        dest_node = str(id(self._states[label]))
+                        dest_node = id(self._states[label])
                         if not st.branch_stack_agree(self._states[label]):
                             opts['color'] = 'red'
                     desc = '<unknown>'
@@ -152,10 +154,8 @@ class TraceGraph(MutableMapping):
                     elif isinstance(term, Jump):
                         desc = 'jump'
 
-                    g.edge(str(id(st)), dest_node,
-                           label=desc, **opts)
+                    g.edge(id(st), dest_node, label=desc, **opts)
 
-        g.render(filename, view=view)
 
 
 def _maybegetpc(x):
