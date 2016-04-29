@@ -22,6 +22,9 @@ class State(object):
     def __iter__(self):
         return iter(self._instlist)
 
+    def __repr__(self):
+        return "<State pc={pc} id=0x{id:x} >".format(id=id(self), pc=self._init_pc)
+
     @property
     def offset(self):
         return self._init_pc
@@ -132,7 +135,7 @@ class State(object):
             self._init_stack.append(use)
 
     def show(self):
-        buf = ['--- State pc={0} ---'.format(self._init_pc)]
+        buf = ['--- {0!r} ---'.format(self)]
         buf.append('init stack: {0}'.format(self._init_stack))
         buf.append('-' * len(buf[0]))
         for inst in self._instlist:
