@@ -555,11 +555,13 @@ class ExtCFGraph(CFGraph):
 
         toplevel = finalize_region_tree(regiontree, set(self.nodes()))
         if len(toplevel) == 1:
-            self._regiontree = tuple(toplevel)[0]
+            regiontree = tuple(toplevel)[0]
         else:
-            self._regiontree = Region()
-            self._regiontree.regions |= toplevel
-            self._regiontree.copy_nodes_from_subregions()
+            regiontree = Region(first=self.entry_point)
+            regiontree.regions |= toplevel
+            regiontree.nodes = set(self.nodes())
+
+        self._regiontree = regiontree
         print(self._regiontree.show())
 
 
@@ -589,13 +591,16 @@ class Region(object):
             self.nodes |= reg.nodes
 
     @property
-    def is_stub(self):
-        return self.first is None and self.last is None
+    def is_trivial(self):
+        return self.first == self.last
+
+    @property
+    def is_extended(self):
+        return self.last is None
 
     @property
     def identity(self):
         return self.first, self.last
-
 
     def show(self, indent=0):
         prefix = ' ' * indent
