@@ -85,6 +85,9 @@ class State(object):
     def pop_block(self):
         return self._blocks.pop()
 
+    def blocks(self):
+        return list(reversed(self._blocks))
+
     def emit(self, inst):
         assert isinstance(inst, Inst)
         assert not self.is_terminated

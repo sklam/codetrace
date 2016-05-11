@@ -116,6 +116,8 @@ class TraceGraph(MutableMapping):
             if (_maybegetpc(st), pc) == (_maybegetpc(edge[0]), edge[1]):
                 if state.can_merge(other):
                     return other
+                    # XXX WHY taking minimum stack doesn't work
+                    # return min([state, other], key=lambda x: len(x._init_stack))
 
     def dump(self):
         for key, st in self._states.items():

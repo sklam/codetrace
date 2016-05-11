@@ -20,6 +20,10 @@ class CFA(object):
         self._cfg.process()
         # self._cfg.dump()
 
+    @property
+    def cfg(self):
+        return self._cfg
+
     def region_tree(self):
         return self._cfg.region_tree()
 
@@ -41,7 +45,7 @@ class CFA(object):
 
     def gv_region_tree(self, tracegraph, filename='regiontree.gv', **kwargs):
         return tracegraph.graphviz(postfn=self._gv_region_tree_postfn,
-                                   **kwargs)
+                                   filename=filename, **kwargs)
 
     def _gv_region_tree_postfn(self, g):
         """
@@ -68,15 +72,55 @@ class CFA(object):
 
             # Draw nodes in this region if they are not drawn yet
             for st in regiontree.nodes:
-                if st not in drawn:
-                    subgraph.node(id(st))
-                    drawn.add(st)
+                assert st not in drawn, 'malform regiontree'
+                subgraph.node(id(st))
+                drawn.add(st)
 
             # Add cluster to parent graph
             parent.subgraph(subgraph)
 
         drawn = set()
         draw_region_tree(g, self.region_tree(), drawn)
+
+    def region_local_cfg(self, tracegraph, region):
+        print(region.show())
+        cfg = controlflow.ExtCFGraph()
+
+        for s in region.nodes:
+            cfg.add_node(s)
+        cfg.add_node(None)
+
+        submap = {}
+        for r in region.regions:
+            submap[r.first] = r
+            cfg.add_node(r)
+
+        def sub(x):
+            y = submap.get(x, x)
+            if y is x and x not in region.nodes:
+                return None
+            return y
+
+        cfg.set_entry_point(sub(region.first))
+
+        for s in region.nodes:
+            for label in s.outgoing_labels():
+                target = tracegraph[label]
+                cfg.add_edge(s, sub(target))
+
+        for r in region.regions:
+            tail = r.last
+            for label in tail.outgoing_labels():
+                target = sub(tracegraph[label])
+                # avoid self reference by regions
+                if target is not r:
+                    cfg.add_edge(r, target)
+
+        cfg.process()
+        # cfg.graphviz(filename='region_local.gv')
+
+        return cfg
+
 
 
 def dot_dom_tree(g, node):

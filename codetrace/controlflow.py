@@ -457,6 +457,18 @@ class ExtCFGraph(CFGraph):
         self._build_post_dominator_tree()
         self._build_region_tree()
 
+    def graphviz(self, filename=None, view=True):
+        from .gvutils import DigraphBuilder
+        g = DigraphBuilder()
+        for a, b in self.adjacency_list():
+            g.edge(a, b)
+        return g.render(filename=filename, view=view)
+
+    def adjacency_list(self):
+        return [(src, dst)
+                for src, dests in self._succs.items()
+                for dst in dests]
+
     def _build_dominator_tree(self):
         doms = self.dominators()
         cur = self.entry_point()
@@ -486,7 +498,6 @@ class ExtCFGraph(CFGraph):
         # ACM SigPlan Notices. Vol. 29. No. 6. ACM, 1994.
         # http://iss.ices.utexas.edu/Publications/Papers/PLDI1994.pdf
 
-        from pprint import pprint
         # Find initial single-entry single-exit region
         doms = self.dominators()
         pdoms = self.post_dominators()
@@ -504,7 +515,6 @@ class ExtCFGraph(CFGraph):
                 if len(intersect) == 1:
                     regions.discard((a, b))
 
-        pprint(regions)
         # assign containment
         containment = collections.defaultdict(set)
 
@@ -518,7 +528,6 @@ class ExtCFGraph(CFGraph):
                     if contains(na, a, b) and contains(nb, a, b):
                         containment[a, b].add((na, nb))
 
-        pprint(containment)
         # build region tree
 
         def build_region_tree(regiontree, nodes):
@@ -545,7 +554,7 @@ class ExtCFGraph(CFGraph):
                 region = Region(first, last)
                 inner_regions = finalize_region_tree(subregions, nodes)
                 region.regions |= inner_regions
-                region.copy_nodes_from_subregions()
+                # region.copy_nodes_from_subregions()
                 for n in list(nodes):
                     if contains(n, first, last):
                         region.nodes.add(n)
@@ -553,13 +562,14 @@ class ExtCFGraph(CFGraph):
                 regions.add(region)
             return regions
 
-        toplevel = finalize_region_tree(regiontree, set(self.nodes()))
+        all_nodes = set(self.nodes())
+        toplevel = finalize_region_tree(regiontree, all_nodes)
         if len(toplevel) == 1:
             regiontree = tuple(toplevel)[0]
         else:
-            regiontree = Region(first=self.entry_point)
+            regiontree = Region(first=self.entry_point())
             regiontree.regions |= toplevel
-            regiontree.nodes = set(self.nodes())
+            regiontree.nodes |= all_nodes
 
         self._regiontree = regiontree
         print(self._regiontree.show())
@@ -586,9 +596,9 @@ class Region(object):
     def __len__(self):
         return len(self.regions)
 
-    def copy_nodes_from_subregions(self):
-        for reg in self.regions:
-            self.nodes |= reg.nodes
+    # def copy_nodes_from_subregions(self):
+    #     for reg in self.regions:
+    #         self.nodes |= reg.nodes
 
     @property
     def is_trivial(self):
@@ -602,17 +612,37 @@ class Region(object):
     def identity(self):
         return self.first, self.last
 
-    def show(self, indent=0):
+    def show(self, indent=0, **kwargs):
+        """show(indent=0, nodes=True)
+        """
         prefix = ' ' * indent
         buf = []
         buf.append("{0}+ Region {1}:".format(prefix, self.identity))
-        buf.append("{0}    nodes: {1}".format(prefix, self.nodes))
+        if kwargs.pop('nodes', True):
+            buf.append("{0}    nodes: {1}".format(prefix, self.nodes))
         if self.regions:
-            buf.append("{0}    subregions".format(prefix))
             for reg in self.regions:
-                inner = reg.show(indent=indent + 4)
+                inner = reg.show(indent=indent + 4, **kwargs)
                 buf.append(inner)
         return '\n'.join(buf)
+
+    def subregions(self):
+        """
+        Returns all sub-regions of this region recursing down the region tree
+        """
+        out = list(self.regions)
+        for r in self:
+            out.extend(r.subregions())
+        return out
+
+    def childnodes(self):
+        """
+        Returns all child-nodes of this region recursing down the region tree
+        """
+        out = list(self.nodes)
+        for r in self.subregions():
+            out.extend(r.nodes)
+        return out
 
 
 def _build_dom_tree(cur, doms):

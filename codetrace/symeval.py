@@ -221,3 +221,15 @@ class SymEval(object):
         self._state.emit(Jump(to, self._state.list_stack()))
         self._add_state_edge(self._state.fork(to), edge)
         self._stop()
+
+    def op_BREAK_LOOP(self, inst):
+        for blk in self._state.blocks():
+            if blk.kind == 'loop':
+                break
+        else:
+            assert False, 'no loop block'
+        to = blk.data['end_loop']
+        edge = self._state, to
+        self._state.emit(Jump(to, self._state.list_stack()))
+        self._add_state_edge(self._state.fork(to), edge)
+        self._stop()
