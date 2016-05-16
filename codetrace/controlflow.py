@@ -6,6 +6,7 @@ from __future__ import print_function, division, absolute_import
 import collections
 import functools
 import sys
+from itertools import permutations, product, combinations
 
 
 class CFBlock(object):
@@ -498,16 +499,29 @@ class ExtCFGraph(CFGraph):
         # ACM SigPlan Notices. Vol. 29. No. 6. ACM, 1994.
         # http://iss.ices.utexas.edu/Publications/Papers/PLDI1994.pdf
 
+        from pprint import pprint
         # Find initial single-entry single-exit region
         doms = self.dominators()
         pdoms = self.post_dominators()
+
+        all_nodes = frozenset(self.nodes())
+
+        def dominates(x, y):
+            return x in doms[y]
+
+        def postdominates(x, y):
+            return x in pdoms[y]
+
+        regions = set()
+
         # rule 1: a dominates b
-        a_dom_b = ((b, a) for b, alist in doms.items() for a in alist)
         # rule 2: b post-dominates a
-        b_pdom_a = ((b, a) for b, a in a_dom_b if b in pdoms[a])
+        for a, b in product(all_nodes, repeat=2):
+            if dominates(a, b) and postdominates(b, a):
+                regions.add((a, b))
+
         # rule 3: cycle equivalence -- every cycle containing a contains b
         loops = self.loops().values()
-        regions = set((a, b) for b, a in b_pdom_a)
         for loop in loops:
             body = loop.body
             for a, b in list(regions):
@@ -515,67 +529,138 @@ class ExtCFGraph(CFGraph):
                 if len(intersect) == 1:
                     regions.discard((a, b))
 
-        # assign containment
-        containment = collections.defaultdict(set)
+        # node membership
 
         def contains(n, a, b):
             # node n is contained if for region (a, b) a dom n and b postdom n
-            return a in doms[n] and b in pdoms[n]
+            return dominates(a, n) and postdominates(b, n)
 
-        for na, nb in regions:
-            for a, b in regions:
-                if not (na is a and nb is b):
-                    if contains(na, a, b) and contains(nb, a, b):
-                        containment[a, b].add((na, nb))
+        membership = collections.defaultdict(set)
+        for a, b in regions:
+            for n in self.nodes():
+                if contains(n, a, b):
+                    membership[a, b].add(n)
+        ranked = sorted(membership, key=lambda x: len(membership[x]))
 
-        # build region tree
+        pprint(ranked)
+        pprint(membership)
 
-        def build_region_tree(regiontree, nodes):
-            # find all regions not contained by others in the activeset
-            activeset = set(nodes)
-            innerset = set()
+        # filter non canonical regions
+        canonical = set()
 
-            for reg in activeset:
-                innerset.add(reg)
-                for other in (activeset - set([reg])):
-                    if reg in containment[other]:
-                        innerset.discard(reg)
+        def canonical_test(region, others):
+            a, b = region
+            # rule 1
+            for c, d in others:
+                if c is a:
+                    # b must dominates d
+                    if not dominates(b, d):
+                        return False
 
-            for reg in innerset:
-                regiontree[reg] = subtree = {}
-                build_region_tree(subtree, containment[reg])
+                if d is b:
+                    # a must postdominates c
+                    if not postdominates(a, c):
+                        return False
 
-        regiontree = {}
-        build_region_tree(regiontree, containment)
+            return True
 
-        def finalize_region_tree(regiontree, nodes):
-            regions = set()
-            for (first, last), subregions in regiontree.items():
-                region = Region(first, last)
-                inner_regions = finalize_region_tree(subregions, nodes)
-                region.regions |= inner_regions
-                # region.copy_nodes_from_subregions()
-                for n in list(nodes):
-                    if contains(n, first, last):
-                        region.nodes.add(n)
-                        nodes.discard(n)
-                regions.add(region)
-            return regions
+        canonical = set()
+        # from small to big regions
+        for region in ranked:
+            if canonical_test(region, canonical):
+                canonical.add(region)
 
-        all_nodes = set(self.nodes())
-        toplevel = finalize_region_tree(regiontree, all_nodes)
-        if len(toplevel) == 1:
-            regiontree = tuple(toplevel)[0]
+        non_canonical = regions - canonical
+        regions = set(canonical)
+        for (a, b), (c, d) in combinations(canonical, r=2):
+            overlap = membership[a, b] & membership[c, d]
+            if overlap:
+                # find a non-canonical
+                repl = None
+                if (a, d) in non_canonical:
+                    repl = (a, d)
+                elif (c, b) in non_canonical:
+                    repl = (c, b)
+                if repl is not None:
+                    non_canonical.remove(repl)
+                    regions.add(repl)
+                    regions.remove((a, b))
+                    regions.remove((c, d))
+
+        # build up tree from bottom up
+        def subregion_test(r, s):
+            a, b = r.first, r.last
+            c, d = s.first, s.last
+            return contains(c, a, b) and contains(d, a, b)
+
+        level = set()
+
+        for a, b in [r for r in ranked if r in regions]:
+            cur = Region(a, b)
+            for sub in list(level):
+                if subregion_test(cur, sub):
+                    level.discard(sub)
+                    cur.regions.add(sub)
+            level.add(cur)
+
+        if len(level) > 1:
+            root = Region(self.entry_point(), None)
+            root.regions |= level
+            root.nodes |= all_nodes
         else:
-            regiontree = Region(first=self.entry_point())
-            regiontree.regions |= toplevel
-            regiontree.nodes |= all_nodes
+            [root] = level
 
-        self._regiontree = regiontree
-        print(self._regiontree.show())
+        # add non-canonical
+        def add_non_canonical(root):
+            inside = {}
+            for (a, b) in non_canonical:
+                top = Region(a, b)
+
+                subregions = set()
+                children = set()
+                for sub in root.regions:
+                    if subregion_test(top, sub):
+                        subregions.add(sub)
+                        children |= membership[sub.first, sub.last]
+                # only include if new region is equivalent to subregions
+                if children == membership[a, b]:
+                    inside[top] = subregions
+
+            ordered = sorted(inside, key=lambda k: len(inside[k]))
+            while ordered:
+                cur = ordered.pop()
+                subregions = inside[cur]
+                if (subregions & root.regions) != subregions:
+                    continue
+                root.regions -= subregions
+                cur.regions |= subregions
+                root.regions.add(cur)
+                non_canonical.remove((cur.first, cur.last))
+
+            for sub in root.regions:
+                add_non_canonical(sub)
+
+        add_non_canonical(root)
+
+        # assign nodes
+        def assign_nodes(tree):
+            for sub in tree.regions:
+                assign_nodes(sub)
+            tree.nodes |= membership[tree.first, tree.last]
+            for sub in tree.regions:
+                tree.nodes -= set(sub.childnodes())
+
+        assign_nodes(root)
+
+        # unnecessary nesting
+        if root.last is None and len(root.regions) == 1: # and not root.nodes:
+            [root] = root.regions
+
+        self._regiontree = root
 
 
 class Region(object):
+
     def __init__(self, first=None, last=None):
         self.first = first
         self.last = last
@@ -595,6 +680,9 @@ class Region(object):
 
     def __len__(self):
         return len(self.regions)
+
+    def __repr__(self):
+        return "<Region {self.first} {self.last} >".format(self=self)
 
     # def copy_nodes_from_subregions(self):
     #     for reg in self.regions:
