@@ -499,7 +499,6 @@ class ExtCFGraph(CFGraph):
         # ACM SigPlan Notices. Vol. 29. No. 6. ACM, 1994.
         # http://iss.ices.utexas.edu/Publications/Papers/PLDI1994.pdf
 
-        from pprint import pprint
         # Find initial single-entry single-exit region
         doms = self.dominators()
         pdoms = self.post_dominators()
@@ -542,9 +541,6 @@ class ExtCFGraph(CFGraph):
                     membership[a, b].add(n)
         ranked = sorted(membership, key=lambda x: len(membership[x]))
 
-        pprint(ranked)
-        pprint(membership)
-
         # filter non canonical regions
         canonical = set()
 
@@ -572,6 +568,7 @@ class ExtCFGraph(CFGraph):
 
         non_canonical = regions - canonical
         regions = set(canonical)
+
         for (a, b), (c, d) in combinations(canonical, r=2):
             overlap = membership[a, b] & membership[c, d]
             if overlap:
@@ -653,10 +650,22 @@ class ExtCFGraph(CFGraph):
         assign_nodes(root)
 
         # unnecessary nesting
-        if root.last is None and len(root.regions) == 1: # and not root.nodes:
+        if root.last is None and len(root.regions) == 1:  # and not root.nodes:
             [root] = root.regions
 
         self._regiontree = root
+
+        # XXX unnecessary
+        # verify
+        def verify(tree, seen):
+            assert not(seen & tree.nodes)
+            seen |= tree.nodes
+            for sub in tree:
+                verify(sub, seen)
+
+        seen = set()
+        verify(root, seen)
+        assert seen == self.nodes()
 
 
 class Region(object):

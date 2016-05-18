@@ -72,27 +72,38 @@ class CFA(object):
 
             # Draw nodes in this region if they are not drawn yet
             for st in regiontree.nodes:
-                assert st not in drawn, 'malform regiontree'
+                assert st not in drawn, 'malform regiontree {0}'.format(st)
                 subgraph.node(id(st))
                 drawn.add(st)
 
             # Add cluster to parent graph
             parent.subgraph(subgraph)
 
+        entry = self.cfg.entry_point()
+        g.edge('entry', id(entry))
+
         drawn = set()
         draw_region_tree(g, self.region_tree(), drawn)
 
+        for exit in self.cfg.exit_points():
+            g.edge(id(exit), 'exit')
+
     def region_local_cfg(self, tracegraph, region):
-        print(region.show())
         cfg = controlflow.ExtCFGraph()
 
+        # handle nodes
         for s in region.nodes:
             cfg.add_node(s)
         cfg.add_node(None)
 
+        # handle subregions
         submap = {}
+
         for r in region.regions:
             submap[r.first] = r
+            for s in r.childnodes():
+                submap[s] = r
+
             cfg.add_node(r)
 
         def sub(x):
@@ -101,7 +112,9 @@ class CFA(object):
                 return None
             return y
 
-        cfg.set_entry_point(sub(region.first))
+        entry = sub(region.first)
+        assert entry is not None
+        cfg.set_entry_point(entry)
 
         for s in region.nodes:
             for label in s.outgoing_labels():
@@ -117,10 +130,8 @@ class CFA(object):
                     cfg.add_edge(r, target)
 
         cfg.process()
-        # cfg.graphviz(filename='region_local.gv')
 
         return cfg
-
 
 
 def dot_dom_tree(g, node):

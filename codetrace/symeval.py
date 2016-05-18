@@ -18,8 +18,10 @@ class SymEval(object):
         self._context = Context()
 
     def run(self):
-        self._todos = {}
-        self._todos[TraceGraph.first_key] = State(self._context, pc=0)
+        self._todos = []
+        self._todos.append((TraceGraph.first_key, State(self._context, pc=0)))
+
+        processed = set()
 
         # build pc-inst lookup table
         instmap = {}
@@ -34,25 +36,17 @@ class SymEval(object):
         #       If a new state is equivalent to an existing one, it is not
         #       included.  Otherwise, the new state is added to the tracegraph.
         while self._todos:
-            self._next = {}
-            laststate, pc = edge = next(iter(self._todos))
+            edge, curstate = self._todos.pop()
+            laststate, pc = edge
             assert isinstance(laststate, State) or laststate is None
-            # XXX: remove me
-            print('evaluating', edge, _maybegetpc(edge[0]))
-            self._state = curstate = self._todos.pop(edge)
+            if edge in processed:
+                continue
+            processed.add(edge)
 
-            offset = instmap[pc]
+            self._next = {}
+            self._state = curstate
 
-            for inst in self._instlist[offset:]:
-                # XXX: remove me
-                print(inst, '|', self._state.pc, '| pc', pc)
-                pc = self._state.pc = inst['pc']
-                self._state.meta(kind='.loc', pc=pc)
-                fname = 'op_' + inst['op']
-                fn = getattr(self, fname)
-                fn(inst)
-                if self._state is None:
-                    break
+            self._symbolic_eval(instmap[pc])
 
             # determine if the new state should be included
             self._determine_todos(edge, curstate)
@@ -66,6 +60,16 @@ class SymEval(object):
         del self._todos
         return self._tracegraph
 
+    def _symbolic_eval(self, offset):
+        for inst in self._instlist[offset:]:
+            pc = self._state.pc = inst['pc']
+            self._state.meta(kind='.loc', pc=pc)
+            fname = 'op_' + inst['op']
+            fn = getattr(self, fname)
+            fn(inst)
+            if self._state is None:
+                break
+
     def _determine_todos(self, edge, state):
         assert edge not in self._tracegraph, 'internal error: edge duplication'
         other = self._tracegraph.find_mergeable(edge, state)
@@ -73,7 +77,7 @@ class SymEval(object):
             # not duplicated or mergeable
             # add to _todos
             self._tracegraph[edge] = state
-            self._todos.update(self._next)
+            self._todos.extend(self._next.items())
         else:
             # mergeable; point edge to other
             self._tracegraph[edge] = other
@@ -107,6 +111,29 @@ class SymEval(object):
         self._state.emit(Ret(value))
         self._stop()
 
+    def stack_rotate(self, count):
+        tos = list(reversed([self._state.tos() for _ in range(3)]))
+        for item in tos[1:] + tos[0:1]:
+            self._state.push(item)
+
+    def restore_block(self, blk):
+        ssize = blk.data['stack_size']
+        while self._state.stack_size > ssize:
+            self._state.pop()
+
+    def op_POP_TOP(self, inst):
+        self._state.pop()
+
+    def op_DUP_TOP(self, inst):
+        tos = self._state.tos()
+        self._state.push(tos)
+
+    def op_ROT_THREE(self, inst):
+        self.stack_rotate(3)
+
+    def op_ROT_TWO(self, inst):
+        self.stack_rotate(2)
+
     def op_LOAD_FAST(self, inst):
         self._state.push(self._state.emit(LoadVar(inst['varname'],
                                                   scope='local')))
@@ -134,6 +161,9 @@ class SymEval(object):
     def op_BINARY_SUBTRACT(self, inst):
         self.op_binary(inst, 'sub')
 
+    def op_BINARY_MULTIPLY(self, inst):
+        self.op_binary(inst, 'mul')
+
     def op_inplace(self, inst, op):
         rhs = self._state.pop()
         lhs = self._state.pop()
@@ -144,7 +174,14 @@ class SymEval(object):
         self.op_inplace(inst, 'iadd')
 
     def op_COMPARE_OP(self, inst):
-        self.op_binary(inst, inst['compare'])
+        opmap = {
+            '<': 'lt',
+            '>': 'gt',
+            '<=': 'le',
+            '>=': 'ge',
+        }
+        op = opmap[inst['compare']]
+        self.op_binary(inst, op)
 
     def op_POP_JUMP_IF_FALSE(self, inst):
         val = self._state.pop()
@@ -162,15 +199,23 @@ class SymEval(object):
         pred = self._state.emit(Op('bool', val))
         self.jump_if(pred, inst['to'], inst['next'], or_pop=True)
 
+    def op_JUMP_IF_FALSE_OR_POP(self, inst):
+        val = self._state.tos()
+        pred = self._state.emit(Op('bool', val))
+        negated = self._state.emit(Op('not', pred))
+        self.jump_if(negated, inst['to'], inst['next'], or_pop=True)
+
     def op_RETURN_VALUE(self, inst):
         val = self._state.pop()
         self.return_value(val)
 
     def op_SETUP_LOOP(self, inst):
-        self._state.push_block(Block('loop', end_loop=inst['to']))
+        self._state.push_block(Block('loop', end_loop=inst['to'],
+                                     stack_size=self._state.stack_size))
 
     def op_POP_BLOCK(self, inst):
-        self._state.pop_block()
+        blk = self._state.pop_block()
+        self.restore_block(blk)
 
     def op_CALL_FUNCTION(self, inst):
         arg = inst['arg']
@@ -183,9 +228,8 @@ class SymEval(object):
             return name, value
 
         kwargs = dict([pop_kwargs() for _ in range(nkwargs)])
-        args = [self._state.pop() for _ in range(nargs)]
+        args = reversed([self._state.pop() for _ in range(nargs)])
         callee = self._state.pop()
-
         retval = self._state.emit(Call(callee, args, kwargs))
         self._state.push(retval)
 
@@ -201,12 +245,27 @@ class SymEval(object):
         pred = self._state.emit(Op('foriter_valid', iterstate))
         iterval = self._state.emit(Op('foriter_value', iterstate))
 
-        self._state.push(iterval)
-
         label_body = inst['next']
         label_end = inst['to']
 
-        self.jump_if(pred, label_body, label_end, or_pop=True)
+        else_state = self._state.fork(pc=label_end)
+        else_args = self._state.list_stack()
+        # pop iterator if loop should end
+        else_state.pop()
+
+        # push iterval if loop should enter
+        self._state.push(iterval)
+        then_state = self._state.fork(pc=label_body)
+        then_args = self._state.list_stack()
+
+        then_edge = self._state, label_body
+        else_edge = self._state, label_end
+
+        self._state.emit(JumpIf(pred, label_body, label_end, then_args,
+                                else_args))
+        self._add_state_edge(then_state, then_edge)
+        self._add_state_edge(else_state, else_edge)
+        self._stop()
 
     def op_JUMP_ABSOLUTE(self, inst):
         to = inst['to']
@@ -229,6 +288,7 @@ class SymEval(object):
         else:
             assert False, 'no loop block'
         to = blk.data['end_loop']
+        self.restore_block(blk)
         edge = self._state, to
         self._state.emit(Jump(to, self._state.list_stack()))
         self._add_state_edge(self._state.fork(to), edge)

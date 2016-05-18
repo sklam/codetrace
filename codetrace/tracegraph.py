@@ -37,6 +37,7 @@ class TraceGraph(MutableMapping):
         # verify each state
         for key, st in self._states.items():
             st.verify()
+        self.verify_stack_agreement()
 
     def verify_stack_agreement(self):
         for key, st in self._states.items():
@@ -49,6 +50,24 @@ class TraceGraph(MutableMapping):
     def simplify(self):
         self.merge_equivalent_states()
         self.combine_straight_line_jumps()
+        self.prune_dead_states()
+
+    def prune_dead_states(self):
+        reachable = set()
+        pending = set([self.first_key])
+        while pending:
+            key = pending.pop()
+            if key in reachable:
+                continue
+            else:
+                reachable.add(key)
+                state = self._states[key]
+                for label in state.outgoing_labels():
+                    pending.add(label)
+
+        unreachable = set(self._states.keys()) - reachable
+        for key in unreachable:
+            del self._states[key]
 
     def combine_straight_line_jumps(self):
         """
@@ -83,7 +102,6 @@ class TraceGraph(MutableMapping):
                 # drop other from candidiates
                 if other in candidates:
                     candidates.add(st)
-                    print("discard", other, other.offset)
                     candidates.discard(other)
 
     def merge_equivalent_states(self):
@@ -101,7 +119,7 @@ class TraceGraph(MutableMapping):
                 failed = []
                 for other in group:
                     if head.can_merge(other):
-                        mapping[other] = head
+                        mapping[head] = other
                     else:
                         failed.append(other)
                 group = failed
@@ -116,8 +134,6 @@ class TraceGraph(MutableMapping):
             if (_maybegetpc(st), pc) == (_maybegetpc(edge[0]), edge[1]):
                 if state.can_merge(other):
                     return other
-                    # XXX WHY taking minimum stack doesn't work
-                    # return min([state, other], key=lambda x: len(x._init_stack))
 
     def dump(self):
         for key, st in self._states.items():

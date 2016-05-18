@@ -58,6 +58,10 @@ class State(object):
     def list_stack(self):
         return list(self._stack)
 
+    @property
+    def stack_size(self):
+        return len(self._stack)
+
     def branch_stack_agree(self, otherstate):
         """
         Check if the stack agrees at the branch
@@ -152,10 +156,9 @@ class State(object):
             raise MalformStateError(msg)
 
     def can_merge(self, other):
-        # XXX CHECK stack size may not match!?!?
-        # if len(self._init_stack) != len(other._init_stack):
-        #     return False
-        if len(self._instlist) != len(other._instlist):
+        if len(self._init_stack) < len(other._init_stack):
+            return False
+        elif len(self._instlist) != len(other._instlist):
             return False
         for ai, bi in zip(self._instlist, other._instlist):
             if not ai.equivalent(bi):
