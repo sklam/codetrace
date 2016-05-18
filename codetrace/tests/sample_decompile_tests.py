@@ -2,12 +2,10 @@ import sys
 import os.path
 import tempfile
 import inspect
-import unittest
 import importlib
 from contextlib import contextmanager
 
 from . import samples
-from .sample_decompile_tests import DecompileTestCase
 from codetrace import symeval, bytecode, cfanalyze, decompiler
 
 
@@ -23,7 +21,7 @@ one_args = [0], [1], [2], [10], [11], [12], [21], [29]
 one_args = [[10]]
 
 
-class TestDecompile(DecompileTestCase, unittest.TestCase):
+class DecompileTestCase(object):
 
     def decompile(self, pyfunc):
         instlist = list(bytecode.disassemble(pyfunc))
@@ -32,15 +30,21 @@ class TestDecompile(DecompileTestCase, unittest.TestCase):
         tracegraph.simplify()
         tracegraph.verify()
 
+        tracegraph = self.rewrite(pyfunc, tracegraph)
+
         cfa = cfanalyze.CFA(tracegraph)
         sig = inspect.signature(pyfunc)
 
         # Plot region tree
-        cfa.gv_region_tree(tracegraph, filename=pyfunc.__name__ + '.gv', view=False)
+        # cfa.gv_region_tree(
+        #     tracegraph, filename=pyfunc.__name__ + '.gv', view=False)
 
         fname = pyfunc.__name__
         code = decompiler.decompile(tracegraph, cfa, fname, sig)
         return code
+
+    def rewrite(self, pyfunc, tracegraph):
+        return tracegraph
 
     def dynamic_import(self, module_name, fname):
         invalidate_caches = getattr(importlib, 'invalidate_caches',
@@ -101,7 +105,3 @@ class TestDecompile(DecompileTestCase, unittest.TestCase):
 
     def test_loop5(self):
         self.check_decompile(samples.loop5, args=one_args)
-
-
-if __name__ == '__main__':
-    unittest.main()
