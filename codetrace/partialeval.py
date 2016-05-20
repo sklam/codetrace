@@ -1,8 +1,6 @@
 from .rewriter import Rewriter
 from . import ir
 
-from pprint import pprint
-import operator
 from collections import defaultdict
 
 
@@ -105,6 +103,11 @@ def constop(opname, type_spec):
 @constop("gt", [int, int])
 def const_gt_int(x, y):
     return x > y
+
+
+@constop("eq", [int, int])
+def const_eq_int(x, y):
+    return x == y
 
 
 @constop("iadd", [int, int])

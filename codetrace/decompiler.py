@@ -186,10 +186,13 @@ class Decompiler(object):
                 'add': '+',
                 'sub': '-',
                 'mul': '*',
+
                 'lt': '<',
                 'le': '<=',
                 'gt': '>',
                 'ge': '>=',
+                'eq': '==',
+                'ne': '!=',
             }
             inplace_ops = {
                 'iadd': '+=',

@@ -182,6 +182,8 @@ class SymEval(object):
             '>': 'gt',
             '<=': 'le',
             '>=': 'ge',
+            '==': 'eq',
+            '!=': 'ne',
         }
         op = opmap[inst['compare']]
         self.op_binary(inst, op)
