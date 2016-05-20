@@ -7,18 +7,22 @@ from collections import defaultdict
 
 
 def partial_evaluate(tracegraph):
-    return ConstProp(tracegraph).rewrite()
+    rewritten = ConstProp(tracegraph).rewrite()
+    rewritten.verify()
+    return rewritten
 
 
 class ConstProp(Rewriter):
+    max_cycle_limit = 1
+
     _constops = defaultdict(dict)
 
     def init(self):
         self._previous_states = {}
 
-    def begin_state(self, incoming_state, cyclic):
+    def begin_state(self, incoming_state, cycle_count):
         default = dict(uses=set(), vars={})
-        if not cyclic:
+        if cycle_count <= self.max_cycle_limit:
             d = self._previous_states.get(incoming_state, default)
         else:
             d = default
@@ -52,9 +56,10 @@ class ConstProp(Rewriter):
 
     def visit_LoadVar(self, inst):
         if self.is_constant(inst.name):
-            self.replace_with_use(self._const_vars[inst.name])
-        else:
-            self.emit(inst)
+            if inst.scope == 'local':
+                self.replace_with_use(self._const_vars[inst.name])
+                return
+        self.emit(inst)
 
     def visit_Op(self, inst):
         if all(map(self.is_constant, inst.args)):
@@ -63,8 +68,9 @@ class ConstProp(Rewriter):
                 vals = [x.value.value for x in inst.args]
                 typs = tuple(map(type, vals))
                 fn = opbin[typs]
-                fn(self, vals)
-                return
+                use = fn(self, vals)
+                if use is not NotImplemented:
+                    return
         # otherwise
         self.emit(inst)
 
@@ -84,6 +90,8 @@ def constop(opname, type_spec):
     def wrap(fn):
         def run(constprop, values):
             res = fn(*values)
+            if res is NotImplemented:
+                return NotImplemented
             use = constprop.emit(ir.Const(res))
             constprop._const_uses.add(use)
             return use
@@ -94,9 +102,19 @@ def constop(opname, type_spec):
     return wrap
 
 
+@constop("gt", [int, int])
+def const_gt_int(x, y):
+    return x > y
+
+
 @constop("iadd", [int, int])
 def const_iadd_int(x, y):
     return x + y
+
+
+@constop("isub", [int, int])
+def const_isub_int(x, y):
+    return x - y
 
 
 @constop('bool', [bool])

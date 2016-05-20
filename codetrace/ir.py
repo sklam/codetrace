@@ -281,6 +281,12 @@ class Call(Value):
                 equivalent_values(zip(self.kwargs.values(),
                                       other.kwargs.values())))
 
+    def replace_uses(self, mapping):
+        return Call(callee=mapping[self.callee],
+                    args=map(mapping.__getitem__, self.args),
+                    kwargs=dict((k, mapping[v])
+                                for k, v in self.kwargs.items()))
+
 
 def equivalent_values(pairs):
     return all(a.equivalent(b) for a, b in pairs)

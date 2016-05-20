@@ -21,7 +21,9 @@ one_args = [0], [1], [2], [10], [11], [12], [21], [29]
 one_args = [[10]]
 
 
-class DecompileTestCase(object):
+class DecompileBase(object):
+
+    view_region_tree = False
 
     def decompile(self, pyfunc):
         instlist = list(bytecode.disassemble(pyfunc))
@@ -36,8 +38,8 @@ class DecompileTestCase(object):
         sig = inspect.signature(pyfunc)
 
         # Plot region tree
-        # cfa.gv_region_tree(
-        #     tracegraph, filename=pyfunc.__name__ + '.gv', view=False)
+        if self.view_region_tree:
+            cfa.gv_region_tree(tracegraph, filename=pyfunc.__name__ + '.gv')
 
         fname = pyfunc.__name__
         code = decompiler.decompile(tracegraph, cfa, fname, sig)
@@ -64,7 +66,7 @@ class DecompileTestCase(object):
     def check_decompile(self, pyfunc, args):
         code = self.decompile(pyfunc)
         fname = pyfunc.__name__
-
+        assert args, 'no test arguments'
         with tempfile.NamedTemporaryFile(mode='w+', suffix='.py') as srcfile:
             self.write_code_to_file(srcfile, code)
 
@@ -75,15 +77,23 @@ class DecompileTestCase(object):
                 # execute
                 for curarg in args:
                     with self.subTest(arg=curarg):
+                        print('expected'.center(80, '-'))
                         expect = pyfunc(*curarg)
+
                         try:
+                            print('got'.center(80, '-'))
                             got = defunc(*curarg)
-                        except KeyboardInterrupt:
+                            self.assertEqual(expect, got)
+                        except:
+
+                            # import pudb; pudb.set_trace()
+                            got = defunc(*curarg)
                             with open('temp_check_error.py', 'w') as fout:
                                 self.write_code_to_file(fout, code)
-                            raise RuntimeError("looping")
+                            raise
 
-                        self.assertEqual(expect, got)
+
+class DecompileTestCase(DecompileBase):
 
     def test_ifelse1(self):
         self.check_decompile(samples.ifelse1, args=one_args)

@@ -173,6 +173,9 @@ class SymEval(object):
     def op_INPLACE_ADD(self, inst):
         self.op_inplace(inst, 'iadd')
 
+    def op_INPLACE_SUBTRACT(self, inst):
+        self.op_inplace(inst, 'isub')
+
     def op_COMPARE_OP(self, inst):
         opmap = {
             '<': 'lt',

@@ -39,10 +39,15 @@ def loop1(a):
 def loop2(a):
     c = 0
     for i in range(a * 2):
+        print('i', i)
         if c < a * 2:
+            print('c', c)
             for i in range(a):
+                print('i2', i)
                 c += i
+                print('c += i', c, i)
         else:
+            print('break')
             break
     return c
 

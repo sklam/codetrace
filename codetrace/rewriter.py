@@ -6,7 +6,6 @@ from collections import defaultdict
 
 
 class Rewriter(object):
-
     def __init__(self, old):
         self.__old = old
         self.__new = TraceGraph()
@@ -16,7 +15,7 @@ class Rewriter(object):
     def init():
         pass
 
-    def begin_state(self, incoming_state, cyclic):
+    def begin_state(self, incoming_state, cycle_count):
         pass
 
     def end_state(self, current_state):
@@ -59,7 +58,7 @@ class Rewriter(object):
                 self.__usemap[old] = new
 
             # rewrite to new state
-            self.begin_state(st, cyclic=(cycle[oldstate] > 5))
+            self.begin_state(st, cycle_count=cycle[oldstate])
             for inst in oldstate:
                 self._dispatch(inst)
             self.end_state(newstate)

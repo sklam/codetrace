@@ -63,6 +63,7 @@ class Decompiler(object):
     def _decompile_state(self, state):
         w = self._writer
         w.println('#', state)
+        # w.println('print("{0!r}")'.format(state))
         w.println(_predicate(state), '= False')
 
         # decompile instructions (except terminator)
@@ -75,6 +76,8 @@ class Decompiler(object):
     def _decompile_region(self, region):
         cfg = self._cfa.region_local_cfg(self._tracegraph, region)
         loops = cfg.loops()
+
+        # cfg.gv_region_tree()
         w = self._writer
 
         postdoms = cfg.post_dominators()
@@ -84,7 +87,14 @@ class Decompiler(object):
         assert cfg.entry_point() in toplevelnodes
 
         # emit nodes
-        if loops:
+
+        # print("LOOPS", loops)
+        # cfg.graphviz()
+        # raise RuntimeError("Loops are not detected")
+        XXX_LOOP_ARE_SOMETIME_NOT_DETECTED = True
+        print('XXX_LOOP_ARE_SOMETIME_NOT_DETECTED',
+              XXX_LOOP_ARE_SOMETIME_NOT_DETECTED)
+        if XXX_LOOP_ARE_SOMETIME_NOT_DETECTED or loops:
             looppreds = list(map(_predicate, toponodes))
             loopcond = ' or '.join(looppreds)
 
@@ -105,7 +115,7 @@ class Decompiler(object):
                 self._decompile(node)
 
         elif node is not None:
-            w.println('assert', pred)
+            w.println('assert', pred, ',', repr('{0} not enabled'.format(pred)))
             self._decompile(node)
 
     def _emit_region_body(self, toponodes, toplevelnodes):
@@ -187,7 +197,8 @@ class Decompiler(object):
                 'ge': '>=',
             }
             inplace_ops = {
-                'iadd': '+='
+                'iadd': '+=',
+                'isub': '-=',
             }
             unary_ops = {
                 'bool': 'bool',
@@ -227,7 +238,7 @@ def _predicate(state_or_region):
         state = state_or_region.first
     else:
         state = state_or_region
-    return '__pred__{0}'.format(state.offset)
+    return '__pred__{0}_{1}'.format(state.offset, id(state))
 
 
 def _descendents_map(descendents):
