@@ -37,6 +37,7 @@ class Decompiler(object):
 
                 # emit body
                 self._decompile(self._cfa.region_tree())
+                self._writer.println('raise AssertionError("unreachable")')
             return self._writer.show()
         except:
             # print(self._writer.show())
@@ -108,7 +109,8 @@ class Decompiler(object):
                 self._decompile(node)
 
         elif node is not None:
-            w.println('assert', pred, ',', repr('{0} not enabled'.format(pred)))
+            w.println('assert', pred, ',', repr(
+                '{0} not enabled'.format(pred)))
             self._decompile(node)
 
     def _emit_region_body(self, toponodes, toplevelnodes):

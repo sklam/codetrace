@@ -56,9 +56,7 @@ def loop3(a):
     c = 0
     for i in range(a):
         d = 0
-        # print('i', i, d)
         for j in range(a):
-            # print('j', j, d)
             d += j
         c += d
     return c
