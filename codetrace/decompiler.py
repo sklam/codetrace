@@ -87,14 +87,7 @@ class Decompiler(object):
         assert cfg.entry_point() in toplevelnodes
 
         # emit nodes
-
-        # print("LOOPS", loops)
-        # cfg.graphviz()
-        # raise RuntimeError("Loops are not detected")
-        XXX_LOOP_ARE_SOMETIME_NOT_DETECTED = True
-        print('XXX_LOOP_ARE_SOMETIME_NOT_DETECTED',
-              XXX_LOOP_ARE_SOMETIME_NOT_DETECTED)
-        if XXX_LOOP_ARE_SOMETIME_NOT_DETECTED or loops:
+        if loops:
             looppreds = list(map(_predicate, toponodes))
             loopcond = ' or '.join(looppreds)
 
