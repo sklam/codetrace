@@ -1,16 +1,15 @@
-from .rewriter import Rewriter
-from . import ir
+from .. import ir, rewriter
 
 from collections import defaultdict
 
 
-def partial_evaluate(tracegraph):
+def constant_propagation(tracegraph):
     rewritten = ConstProp(tracegraph).rewrite()
     rewritten.verify()
     return rewritten
 
 
-class ConstProp(Rewriter):
+class ConstProp(rewriter.Rewriter):
     max_cycle_limit = 1
 
     _constops = defaultdict(dict)

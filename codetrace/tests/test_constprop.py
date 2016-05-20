@@ -1,14 +1,14 @@
 import unittest
 
 from .sample_decompile_tests import DecompileTestCase, DecompileBase
-from codetrace import partialeval
+from codetrace.passes.constprop import constant_propagation
 
 
 class RewriteBase(object):
 
     def rewrite(self, pyfunc, tracegraph):
         self.original_tracegraph = tracegraph
-        rewritten = partialeval.partial_evaluate(tracegraph)
+        rewritten = constant_propagation(tracegraph)
         rewritten.simplify()
         rewritten.verify()
         self.rewritten_tracegraph = rewritten
