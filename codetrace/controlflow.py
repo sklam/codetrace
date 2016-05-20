@@ -350,22 +350,24 @@ class CFGraph(object):
         self._remove_node_edges(dummy_exit)
         self._exit_points.remove(dummy_exit)
 
-    # Finding loops and back edges: see
-    # http://pages.cs.wisc.edu/~fischer/cs701.f08/finding.loops.html
-
     def _find_back_edges(self):
         """
-        Find back edges.  An edge (src, dest) is a back edge if and
-        only if *dest* dominates *src*.
+        Find back edges.  Using DFS to detect cycles.
         """
-        back_edges = set()
-        for src, succs in self._succs.items():
-            back = self._doms[src] & succs
-            # In CPython bytecode, at most one back edge can flow from a
-            # given block.
-            assert len(back) <= 1
-            back_edges.update((src, dest) for dest in back)
-        self._back_edges = back_edges
+        backedges = set()
+
+        def dfs(stack):
+            tos = stack[-1]
+            succs = self._succs[tos]
+            for other in succs:
+                if other in stack:
+                    backedges.add((tos, other))
+                else:
+                    dfs(stack + (other,))
+
+        stack = tuple([self._entry_point])
+        dfs(stack)
+        self._back_edges = backedges
 
     def _find_topo_order(self):
         succs = self._succs
