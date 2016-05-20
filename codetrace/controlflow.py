@@ -370,22 +370,25 @@ class CFGraph(object):
         self._back_edges = backedges
 
     def _find_topo_order(self):
-        succs = self._succs
-        back_edges = self._back_edges
-        post_order = []
         seen = set()
+        temp = set()
+        post_order = []
 
-        def _dfs_rec(node):
-            if node not in seen:
-                seen.add(node)
-                for dest in succs[node]:
-                    if (node, dest) not in back_edges:
-                        _dfs_rec(dest)
-                post_order.append(node)
+        def dfs(node):
+            if node in temp or node in seen:
+                return
 
-        _dfs_rec(self._entry_point)
-        post_order.reverse()
-        self._topo_order = post_order
+            temp.add(node)
+            succs = self._succs[node]
+            for other in succs:
+                dfs(other)
+            temp.discard(node)
+            seen.add(node)
+            post_order.append(node)
+
+        dfs(self._entry_point)
+        self._topo_order = list(reversed(post_order))
+        assert len(self._topo_order) == len(self._nodes)
 
     def _find_descendents(self):
         descs = collections.defaultdict(set)
