@@ -5,21 +5,56 @@ from . import ir
 from collections import defaultdict
 
 
+class _Dict(dict):
+    def __getattr__(self, key):
+        return self[key]
+
+
 class Rewriter(object):
-    def __init__(self, old):
+    def __init__(self, old, **kwargs):
         self.__old = old
         self.__new = TraceGraph()
         self.__usemap = {}
+        self._previous_states = {}
+        self.kwargs = kwargs.copy()
         self.init()
 
-    def init():
+    def init(self):
         pass
+
+    def get_state_data(self):
+        return {}
+
+    def _default_state_data(self):
+        dct = _Dict()
+        for k, cls in self.get_state_data().items():
+            grp = cls()
+            grp.__dict__.update(grp.init())
+            dct[k] = grp
+        return dct
+
+    def _copy_state_data(self, dct):
+        out = _Dict()
+        for k, grp in dct.items():
+            cpy = grp.__class__()
+            cpy.__dict__.update(grp.copy())
+            out[k] = cpy
+        return out
 
     def begin_state(self, incoming_state, cycle_count):
-        pass
+        d = None
+        if cycle_count <= self.max_cycle_limit:
+            d = self._previous_states.get(incoming_state)
+        if d is None:
+            d = self._default_state_data()
+        self.data = self._copy_state_data(d)
+        # set meta data
+        for k, grp in self.data.items():
+            self.meta(**grp.meta())
 
     def end_state(self, current_state):
-        pass
+        self._previous_states[current_state] = self.data
+        del self.data
 
     def meta(self, **kwargs):
         self.__curstate.meta(**kwargs)

@@ -25,14 +25,14 @@ class DecompileBase(object):
 
     view_region_tree = False
 
-    def decompile(self, pyfunc):
+    def decompile(self, pyfunc, **kwargs):
         instlist = list(bytecode.disassemble(pyfunc))
 
         tracegraph = symeval.symbolic_evaluate(instlist)
         tracegraph.simplify()
         tracegraph.verify()
 
-        tracegraph = self.rewrite(pyfunc, tracegraph)
+        tracegraph = self.rewrite(pyfunc, tracegraph, **kwargs)
 
         cfa = cfanalyze.CFA(tracegraph)
         sig = inspect.signature(pyfunc)
@@ -63,8 +63,8 @@ class DecompileBase(object):
         print(code, file=srcfile)
         srcfile.flush()
 
-    def check_decompile(self, pyfunc, args):
-        code = self.decompile(pyfunc)
+    def check_decompile(self, pyfunc, args, **kwargs):
+        code = self.decompile(pyfunc, **kwargs)
         fname = pyfunc.__name__
         assert args, 'no test arguments'
         with tempfile.NamedTemporaryFile(mode='w+', suffix='.py') as srcfile:

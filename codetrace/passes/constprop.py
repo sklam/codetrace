@@ -1,7 +1,12 @@
-from .. import ir, rewriter
-
+import logging
+import builtins
 from collections import defaultdict
 
+from .. import ir, rewriter
+
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
 def constant_propagation(tracegraph):
     rewritten = ConstProp(tracegraph).rewrite()
@@ -9,53 +14,64 @@ def constant_propagation(tracegraph):
     return rewritten
 
 
+class ConstData(object):
+    def init(self):
+        return dict(uses=set(), vars={})
+
+    def copy(self):
+        return dict(uses=self.uses.copy(), vars=self.vars.copy())
+
+    def meta(self):
+        return dict(const_assert=self.vars.copy())
+
+
 class ConstProp(rewriter.Rewriter):
     max_cycle_limit = 1
 
+    immutable_globals = frozenset(['isinstance', 'int', 'float'])
+
     _constops = defaultdict(dict)
 
-    def init(self):
-        self._previous_states = {}
-
-    def begin_state(self, incoming_state, cycle_count):
-        default = dict(uses=set(), vars={})
-        if cycle_count <= self.max_cycle_limit:
-            d = self._previous_states.get(incoming_state, default)
-        else:
-            d = default
-        self._const_uses = d['uses'].copy()
-        self._const_vars = d['vars'].copy()
-        if incoming_state is not None:
-            self.meta(const_assert=self._const_vars.copy())
-
-    def end_state(self, current_state):
-        self._previous_states[current_state] = dict(uses=self._const_uses,
-                                                    vars=self._const_vars)
-        del self._const_uses
-        del self._const_vars
+    def get_state_data(self):
+        dct = super(ConstProp, self).get_state_data()
+        assert 'const' not in dct
+        dct.update({'const': ConstData})
+        return dct
 
     def is_constant(self, item):
         if isinstance(item, ir.Use):
-            return item in self._const_uses
+            return item in self.data.const.uses
         else:
-            return item in self._const_vars
+            return item in self.data.const.vars
+
+    def add_constant_uses(self, inst):
+        use = self.emit(inst)
+        self.data.const.uses.add(use)
+        logger.debug('add const_uses %s -> %s', use, use.value)
+        return use
 
     def visit_Const(self, inst):
-        use = self.emit(inst)
-        self._const_uses.add(use)
+        self.add_constant_uses(inst)
 
     def visit_StoreVar(self, inst):
         self.emit(inst)
         if self.is_constant(inst.value):
-            self._const_vars[inst.name] = inst.value
-        elif inst.name in self._const_vars:
-            del self._const_vars[inst.name]
+            self.data.const.vars[inst.name] = inst.value
+        elif inst.name in self.data.const.vars:
+            del self.data.const.vars[inst.name]
 
     def visit_LoadVar(self, inst):
-        if self.is_constant(inst.name):
-            if inst.scope == 'local':
-                self.replace_with_use(self._const_vars[inst.name])
+        if inst.scope == 'local':
+            if self.is_constant(inst.name):
+                self.replace_with_use(self.data.const.vars[inst.name])
                 return
+
+        elif inst.scope == 'global':
+            if inst.name in self.immutable_globals:
+                self.add_constant_uses(inst)
+                self.data.const.vars[inst.name] = getattr(builtins, inst.name)
+                return
+
         self.emit(inst)
 
     def visit_Op(self, inst):
@@ -90,7 +106,7 @@ def constop(opname, type_spec):
             if res is NotImplemented:
                 return NotImplemented
             use = constprop.emit(ir.Const(res))
-            constprop._const_uses.add(use)
+            constprop.data.const.uses.add(use)
             return use
 
         opbin = ConstProp._constops[opname]
