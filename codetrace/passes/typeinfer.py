@@ -8,6 +8,7 @@ from . import constprop
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
+
 def type_inference(tracegraph, typeinfos):
     rewritten = TypeInferer(tracegraph, typeinfos=typeinfos).rewrite()
     rewritten.verify()
@@ -55,5 +56,3 @@ class TypeInferer(constprop.ConstProp):
                             return
 
         return super(TypeInferer, self).visit_Call(inst)
-
-

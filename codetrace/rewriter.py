@@ -1,5 +1,4 @@
 from .tracegraph import TraceGraph
-from .state import State
 from . import ir
 
 from collections import defaultdict
@@ -7,7 +6,10 @@ from collections import defaultdict
 
 class _Dict(dict):
     def __getattr__(self, key):
-        return self[key]
+        try:
+            return self[key]
+        except KeyError:
+            raise AttributeError(key)
 
 
 class Rewriter(object):
@@ -119,14 +121,14 @@ class Rewriter(object):
             self.__curuse = None
             if isinstance(inst, ir.Meta) and inst.values.get('kind') == '.loc':
                 self.__curstate.pc = inst.values['pc']
-        self._visit(self.replace_uses(inst))
+        self._visit(self._replace_uses(inst))
 
     def _visit(self, inst):
         fname = 'visit_' + inst.__class__.__name__
         fn = getattr(self, fname, self.visit_generic)
         return fn(inst)
 
-    def replace_uses(self, inst):
+    def _replace_uses(self, inst):
         if hasattr(inst, 'replace_uses'):
             return inst.replace_uses(self.__usemap)
         else:

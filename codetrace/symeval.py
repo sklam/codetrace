@@ -1,7 +1,7 @@
 from .state import State
 from .ir import (JumpIf, Jump, Ret, LoadVar, Const, Op, StoreVar, Call,
                  Context, Block)
-from .tracegraph import TraceGraph, _maybegetpc
+from .tracegraph import TraceGraph
 
 
 def symbolic_evaluate(instlist):

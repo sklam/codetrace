@@ -6,7 +6,7 @@ from __future__ import print_function, division, absolute_import
 import collections
 import functools
 import sys
-from itertools import permutations, product, combinations
+from itertools import product, combinations
 
 
 class CFBlock(object):

@@ -8,6 +8,7 @@ from .. import ir, rewriter
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
+
 def constant_propagation(tracegraph):
     rewritten = ConstProp(tracegraph).rewrite()
     rewritten.verify()
@@ -15,6 +16,7 @@ def constant_propagation(tracegraph):
 
 
 class ConstData(object):
+
     def init(self):
         return dict(uses=set(), vars={})
 

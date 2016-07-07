@@ -54,6 +54,9 @@ class Use(object):
     def replace(self, value):
         self._value = value
 
+    def get_uses(self):
+        return self._value.get_uses()
+
 
 class Inst(object):
 
@@ -80,6 +83,9 @@ class Meta(Inst):
 
     def _equivalent(self, other):
         return self.values == other.values
+
+    def get_uses(self):
+        return set()
 
 
 class Terminator(Inst):
@@ -166,6 +172,9 @@ class JumpIf(Terminator):
                       [mapping[x] for x in self.then_args],
                       [mapping[x] for x in self.else_args])
 
+    def get_uses(self):
+        return set([self.pred]) | set(self.then_args) | set(self.else_args)
+
 
 class Ret(Terminator):
 
@@ -180,6 +189,9 @@ class Ret(Terminator):
 
     def replace_uses(self, mapping):
         return Ret(mapping[self.value])
+
+    def get_uses(self):
+        return set([self.value])
 
 
 class Value(Inst):
@@ -214,6 +226,9 @@ class Op(Value):
     def replace_uses(self, mapping):
         return Op(self.op, *(mapping[a] for a in self.args))
 
+    def get_uses(self):
+        return set(self.args)
+
 
 class Const(Value):
 
@@ -225,6 +240,9 @@ class Const(Value):
 
     def _equivalent(self, other):
         return self.value == other.value
+
+    def get_uses(self):
+        return set([])
 
 
 class LoadVar(Value):
@@ -239,6 +257,9 @@ class LoadVar(Value):
 
     def _equivalent(self, other):
         return (self.name == other.name and self.scope == other.scope)
+
+    def get_uses(self):
+        return set()
 
 
 class StoreVar(Inst):
@@ -261,6 +282,9 @@ class StoreVar(Inst):
     def replace_uses(self, mapping):
         return StoreVar(value=mapping[self.value], name=self.name,
                         scope=self.scope)
+
+    def get_uses(self):
+        return set([self.value])
 
 
 class Call(Value):
@@ -286,6 +310,9 @@ class Call(Value):
                     args=map(mapping.__getitem__, self.args),
                     kwargs=dict((k, mapping[v])
                                 for k, v in self.kwargs.items()))
+
+    def get_uses(self):
+        return set([self.callee]) | set(self.args) | set(self.kwargs.values())
 
 
 def equivalent_values(pairs):
