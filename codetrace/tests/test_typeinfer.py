@@ -11,13 +11,8 @@ class RewriteBase(object):
         rewritten = type_inference(tracegraph, typeinfos)
         rewritten.simplify()
         rewritten.verify()
-        rewritten.graphviz()
         self.rewritten_tracegraph = rewritten
         return rewritten
-
-#
-# class TestConstProp(RewriteBase, DecompileTestCase, unittest.TestCase):
-#     pass
 
 
 class TestTypeInfer(RewriteBase, DecompileBase, unittest.TestCase):
@@ -33,10 +28,10 @@ class TestTypeInfer(RewriteBase, DecompileBase, unittest.TestCase):
         typeinfos = {'a': int}
         self.check_decompile(fold_ifelse, [(1,)], typeinfos=typeinfos)
         # there should be a reduction of states
-        # self.assertLess(len(self.rewritten_tracegraph),
-        #                 len(self.original_tracegraph))
+        self.assertLess(len(self.rewritten_tracegraph),
+                        len(self.original_tracegraph))
         # there is exactly one states
-        # self.assertEqual(len(self.rewritten_tracegraph), 1)
+        self.assertEqual(len(self.rewritten_tracegraph), 1)
 
 
 if __name__ == '__main__':
