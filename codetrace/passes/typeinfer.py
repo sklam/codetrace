@@ -44,15 +44,19 @@ class TypeInferer(constprop.ConstProp):
 
     def visit_Call(self, inst):
         if self.is_constant(inst.callee):
-            if len(inst.args) == 2 and not inst.kwargs:
-                val, typ = inst.args
-                loadinst = val.value
-                if isinstance(loadinst, ir.LoadVar):
-                    known_type = self.data.typeinfer.typeinfos[loadinst.name]
-                    # XXX: constant does not imply type
-                    if self.is_constant(typ):
-                        if self.data.const.vars[typ.value.name] == known_type:
-                            self.add_constant_uses(ir.Const(True))
-                            return
+            loadcallee = inst.callee.value
+            if (isinstance(loadcallee, ir.LoadVar) and
+                    loadcallee.name == 'isinstance' and
+                    loadcallee.scope == 'global'):
+                if len(inst.args) == 2 and not inst.kwargs:
+                    val, typ = inst.args
+                    loadinst = val.value
+                    if isinstance(loadinst, ir.LoadVar):
+                        known_type = self.data.typeinfer.typeinfos[loadinst.name]
+                        # XXX: constant does not imply type.
+                        if self.is_constant(typ):
+                            if self.data.const.vars[typ.value.name] == known_type:
+                                self.add_constant_uses(ir.Const(True))
+                                return
 
         return super(TypeInferer, self).visit_Call(inst)
