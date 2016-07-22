@@ -4,27 +4,38 @@ import dis
 
 from codetrace import symeval, bytecode
 
-#
-# def foo(a):
-#     c = 0
-#     for i in range(a):
-#         c += i
-#     return c
-#
+
+def foo(a):
+    c = 0
+    for i in range(a):
+        c += i
+    return c
+
 # def foo(a):
 #     c = 0
 #     for i in range(a):
 #         d = 0
-#         for j in range(a):
-#             d += j
+#         # for j in range(a):
+#         #     d += j
 #         c += d
 #     return c
 
 
-def foo(a, b):
-    c = a and b + 1 or b
-    for i in range(c):
-        c += 1
+# def foo(a, b):
+#     c = a and b + 1 or b
+#     for i in range(c):
+#         c += 1
+#     return c
+
+
+def foo(a):
+    c = 0
+    for i in range(a * 2):
+        if c < a * 2:
+            for i in range(a):
+                c += i
+        else:
+            break
     return c
 
 dis.dis(foo)
@@ -36,5 +47,5 @@ tracegraph = symeval.symbolic_evaluate(instlist)
 tracegraph.dump()
 tracegraph.simplify()
 
-tracegraph.graphviz()
+# tracegraph.graphviz()
 tracegraph.verify()

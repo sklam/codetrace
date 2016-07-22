@@ -38,7 +38,7 @@ class Use(object):
         return "{0} = {1}".format(self, self._value)
 
     def equivalent(self, other):
-        if type(self) == type(other):
+        if type(self) is type(other):
             return self._value.equivalent(other._value)
         else:
             return False
